@@ -53,6 +53,8 @@
 // Common
 #define D_ADMIN "Admin"
 #define D_AIR_QUALITY "Luftqualität"
+#define D_AIR_QUALITY_INDEX "Luftqualitätsindex"
+#define D_AIR_QUALITY_STATE "Luftqualität Status"
 #define D_AP "AP"                    // Access Point
 #define D_AS "als"
 #define D_AUTO "AUTO"
@@ -538,6 +540,14 @@
 #define D_SENSOR_DID_NOT_ACK_COMMAND "Sensor hat Befehl nicht ausgeführt"
 #define D_SHT1X_FOUND "SHT1X gefunden"
 
+// xsns_09_bmp.ino
+#define D_BME680_IAQ_HAZARD "Gefährlich"
+#define D_BME680_IAQ_VERY_UNHEALTHY "Sehr ungesund"
+#define D_BME680_IAQ_UNHEALTHY "Ungesund"
+#define D_BME680_IAQ_UNHEALTHY_SENSITVE "Ungesund für sensible Gruppen"
+#define D_BME680_IAQ_MODERATE "Befriedigend"
+#define D_BME680_IAQ_GOOD "Gut"
+
 // xsns_18_pms5003.ino
 #define D_STANDARD_CONCENTRATION "CF-1 PM"     // Standard Particle CF-1 Particle Matter
 #define D_ENVIRONMENTAL_CONCENTRATION "PM"     // Environmetal Particle Matter
@@ -862,6 +872,7 @@
 
 // Units
 #define D_UNIT_AMPERE "A"
+#define D_UNIT_AQI "AQI"
 #define D_UNIT_CELSIUS "C"
 #define D_UNIT_CENTIMETER "cm"
 #define D_UNIT_DEGREE "°"

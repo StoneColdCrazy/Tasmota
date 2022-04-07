@@ -60,6 +60,7 @@ typedef struct {
 #ifdef USE_BME68X
   uint8_t bme680_state;
   float bmp_gas_resistance;
+  float bmp_air_qualtiy_index;
 #endif  // USE_BME68X
   float bmp_temperature;
   float bmp_pressure;
@@ -418,6 +419,76 @@ bool Bme680Init(uint8_t bmp_idx) {
   return true;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////
+// >>>> CALCULATE IAQ
+///////////////////////////////////////////////////////////
+
+float hum_weighting = 0.25; // so hum effect is 25% of the total air quality score
+float gas_weighting = 0.75; // so gas effect is 75% of the total air quality score
+
+//int   humidity_score;
+//int   gas_score;
+//float gas_reference = 2500;
+
+
+
+
+int   gas_lower_limit = 10000;  // Bad air quality limit
+int   gas_upper_limit = 300000; // Good air quality limit
+float hum_reference = 40;
+
+
+int Bme680GetHumidityScore(uint8_t bmp_idx) {
+  float current_humidity = bmp_sensors[bmp_idx].bmp_humidity;
+  int humidity_score = 0;
+  if (current_humidity >= 38 && current_humidity <= 42) // Humidity +/-5% around optimum
+    humidity_score = 0.25 * 100;
+  else
+  { // Humidity is sub-optimal
+    if (current_humidity < 38)
+      humidity_score = 0.25 / hum_reference * current_humidity * 100;
+    else
+    {
+      humidity_score = ((-0.25 / (100 - hum_reference) * current_humidity) + 0.416666) * 100;
+    }
+  }
+  return humidity_score;
+}
+
+int Bme680GetGasScore(uint8_t bmp_idx) {
+  //Calculate gas contribution to IAQ index
+  int gas_score = (0.75 / (gas_upper_limit - gas_lower_limit) * (bmp_sensors[bmp_idx].bmp_gas_resistance * 1000) - (gas_lower_limit * (0.75 / (gas_upper_limit - gas_lower_limit)))) * 100.00;
+  if (gas_score > 75) gas_score = 75; // Sometimes gas readings can go outside of expected scale maximum
+  if (gas_score <  0) gas_score = 0;  // Sometimes gas readings can go outside of expected scale minimum
+  return gas_score;
+}
+
+float Bme680CalculateIAQ(uint8_t bmp_idx) {
+
+  int humidity_score = Bme680GetHumidityScore(bmp_idx);
+  int gas_score      = Bme680GetGasScore(bmp_idx);
+
+  // Combine results for the final IAQ index value (0-500 where 0-50 is good quality air)
+  return (100 - humidity_score - gas_score) * 5;
+}
+
+///////////////////////////////////////////////////////////
+// <<<< CALCULATE IAQ
+///////////////////////////////////////////////////////////
+
+
+
 void Bme680Read(uint8_t bmp_idx)
 {
   if (!bme_dev) { return; }
@@ -453,14 +524,20 @@ void Bme680Read(uint8_t bmp_idx)
       bmp_sensors[bmp_idx].bmp_pressure = data.pressure / 100.0;        // Pressure in Pascal (converted to hPa)
       // Avoid using measurements from an unstable heating setup
       if (data.status & BME68X_GASM_VALID_MSK) {
-        bmp_sensors[bmp_idx].bmp_gas_resistance = data.gas_resistance / 1000.0;  // Gas resistance in Ohms (converted to kOhm)
+        bmp_sensors[bmp_idx].bmp_gas_resistance = data.gas_resistance / 1000.0;   // Gas resistance in Ohms (converted to kOhm)
+        bmp_sensors[bmp_idx].bmp_air_qualtiy_index = Bme680CalculateIAQ(bmp_idx); // Calculate IAQ
       } else {
         bmp_sensors[bmp_idx].bmp_gas_resistance = 0;
+        bmp_sensors[bmp_idx].bmp_air_qualtiy_index = 0;
       }
     }
   }
   return;
 }
+
+
+
+
 
 #endif  // USE_BME68X
 
@@ -558,6 +635,17 @@ void BmpShow(bool json)
 #ifdef USE_BME68X
       char gas_resistance[33];
       dtostrfd(bmp_sensors[bmp_idx].bmp_gas_resistance, 2, gas_resistance);
+      char air_quality_index[33];
+      dtostrfd(bmp_sensors[bmp_idx].bmp_air_qualtiy_index, 0, air_quality_index);
+
+      char air_quality_state[60];
+      if      (bmp_sensors[bmp_idx].bmp_air_qualtiy_index >= 301)                  snprintf_P(air_quality_state, sizeof(air_quality_state), PSTR("%s"), D_BME680_IAQ_HAZARD);
+      else if (bmp_sensors[bmp_idx].bmp_air_qualtiy_index >= 201 && bmp_sensors[bmp_idx].bmp_air_qualtiy_index <= 300 ) snprintf_P(air_quality_state, sizeof(air_quality_state), PSTR("%s"), D_BME680_IAQ_VERY_UNHEALTHY);
+      else if (bmp_sensors[bmp_idx].bmp_air_qualtiy_index >= 176 && bmp_sensors[bmp_idx].bmp_air_qualtiy_index <= 200 ) snprintf_P(air_quality_state, sizeof(air_quality_state), PSTR("%s"), D_BME680_IAQ_UNHEALTHY);
+      else if (bmp_sensors[bmp_idx].bmp_air_qualtiy_index >= 151 && bmp_sensors[bmp_idx].bmp_air_qualtiy_index <= 175 ) snprintf_P(air_quality_state, sizeof(air_quality_state), PSTR("%s"), D_BME680_IAQ_UNHEALTHY_SENSITVE);
+      else if (bmp_sensors[bmp_idx].bmp_air_qualtiy_index >=  51 && bmp_sensors[bmp_idx].bmp_air_qualtiy_index <= 150 ) snprintf_P(air_quality_state, sizeof(air_quality_state), PSTR("%s"), D_BME680_IAQ_MODERATE);
+      else                                    snprintf_P(air_quality_state, sizeof(air_quality_state), PSTR("%s"), D_BME680_IAQ_GOOD);
+
 #endif  // USE_BME68X
 
       if (json) {
@@ -568,14 +656,20 @@ void BmpShow(bool json)
 #ifdef USE_BME68X
         char json_gas[40];
         snprintf_P(json_gas, sizeof(json_gas), PSTR(",\"" D_JSON_GAS "\":%s"), gas_resistance);
+        char json_air_quality[80];
+        snprintf_P(json_air_quality, sizeof(json_air_quality), PSTR(",\"" D_JSON_AIRQUALITY "\":%s"), air_quality_index);
 
-        ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s,\"" D_JSON_PRESSURE "\":%s%s%s}"),
+        
+
+        ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s,\"" D_JSON_PRESSURE "\":%s%s%s%s}"),
           name,
           Settings->flag2.temperature_resolution, &bmp_temperature,
           (bmp_sensors[bmp_idx].bmp_model >= 2) ? json_humidity : "",
           pressure,
           (Settings->altitude != 0) ? json_sealevel : "",
-          (bmp_sensors[bmp_idx].bmp_model >= 3) ? json_gas : "");
+          (bmp_sensors[bmp_idx].bmp_model >= 3) ? json_gas : "",
+          (bmp_sensors[bmp_idx].bmp_model >= 3) ? json_air_quality : ""
+        );
 #else
         ResponseAppend_P(PSTR(",\"%s\":{\"" D_JSON_TEMPERATURE "\":%*_f%s,\"" D_JSON_PRESSURE "\":%s%s}"),
           name, Settings->flag2.temperature_resolution, &bmp_temperature, (bmp_sensors[bmp_idx].bmp_model >= 2) ? json_humidity : "", pressure, (Settings->altitude != 0) ? json_sealevel : "");
@@ -585,7 +679,8 @@ void BmpShow(bool json)
         if ((0 == TasmotaGlobal.tele_period) && (0 == bmp_idx)) {  // We want the same first sensor to report to Domoticz in case a read is missed
           DomoticzTempHumPressureSensor(bmp_temperature, bmp_humidity, bmp_pressure);
 #ifdef USE_BME68X
-          if (bmp_sensors[bmp_idx].bmp_model >= 3) { DomoticzSensor(DZ_AIRQUALITY, (uint32_t)bmp_sensors[bmp_idx].bmp_gas_resistance); }
+          //if (bmp_sensors[bmp_idx].bmp_model >= 3) { DomoticzSensor(DZ_AIRQUALITY, (uint32_t)bmp_sensors[bmp_idx].bmp_gas_resistance); }
+          if (bmp_sensors[bmp_idx].bmp_model >= 3) { DomoticzSensor(DZ_AIRQUALITY, (uint32_t)bmp_sensors[bmp_idx].bmp_air_qualtiy_index); }
 #endif  // USE_BME68X
         }
 #endif  // USE_DOMOTICZ
@@ -611,6 +706,8 @@ void BmpShow(bool json)
 #ifdef USE_BME68X
         if (bmp_sensors[bmp_idx].bmp_model >= 3) {
           WSContentSend_PD(PSTR("{s}%s " D_GAS "{m}%s " D_UNIT_KILOOHM "{e}"), name, gas_resistance);
+          WSContentSend_PD(PSTR("{s}%s " D_AIR_QUALITY_INDEX "{m}%s " D_UNIT_AQI "{e}"), name, air_quality_index);
+          WSContentSend_PD(PSTR("{s}%s " D_AIR_QUALITY_STATE "{m}%s{e}"), name, air_quality_state);
         }
 #endif  // USE_BME68X
 
